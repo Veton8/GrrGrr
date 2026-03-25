@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Grgr",
+    "slug": "grgr",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#000000"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.grgr.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Grgr needs camera access for live streaming",
+        "NSMicrophoneUsageDescription": "Grgr needs microphone access for live streaming"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#000000"
+      },
+      "package": "com.grgr.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO"
+      ]
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-av",
+      "expo-image-picker",
+      "expo-secure-store",
+      "expo-font"
+    ]
+  }
+}

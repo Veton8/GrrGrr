@@ -1,0 +1,13 @@
+{
+  "name": "grgr",
+  "private": true,
+  "scripts": {
+    "backend:dev": "cd backend && npm run dev",
+    "backend:start": "cd backend && npm start",
+    "mobile:start": "cd mobile && npx expo start",
+    "mobile:ios": "cd mobile && npx expo start --ios",
+    "mobile:android": "cd mobile && npx expo start --android",
+    "db:migrate": "cd backend && npm run db:migrate",
+    "install:all": "npm install --prefix backend && npm install --prefix mobile"
+  }
+}

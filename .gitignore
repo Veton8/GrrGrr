@@ -1,0 +1,15 @@
+node_modules/
+.env
+*.env.local
+.expo/
+dist/
+build/
+*.log
+.DS_Store
+Thumbs.db
+*.db
+*.db-shm
+*.db-wal
+.claude/
+/mobile/node_modules/.cache/
+/tmp/
