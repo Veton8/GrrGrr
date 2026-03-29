@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,9 +7,14 @@ import {
   FlatList,
   Image,
   Dimensions,
+  Alert,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import useAuthStore from '../../store/authStore';
 import api from '../../services/api';
 import { colors, spacing, fontSize } from '../../utils/theme';
@@ -18,16 +23,20 @@ const { width } = Dimensions.get('window');
 const GRID_SIZE = (width - 4) / 3;
 
 export default function MyProfileScreen({ navigation }) {
-  const { user, logout } = useAuthStore();
+  const { user, logout, updateUser } = useAuthStore();
   const [videos, setVideos] = useState([]);
   const [stats, setStats] = useState({ followerCount: 0, followingCount: 0, videoCount: 0 });
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  useEffect(() => {
-    if (user?.username) {
-      fetchProfile();
-      fetchVideos();
-    }
-  }, [user]);
+  // Re-fetch profile & videos every time the screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.username) {
+        fetchProfile();
+        fetchVideos();
+      }
+    }, [user?.username])
+  );
 
   const fetchProfile = async () => {
     try {
@@ -51,11 +60,61 @@ export default function MyProfileScreen({ navigation }) {
     }
   };
 
+  const pickAndUploadAvatar = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow access to your photo library to change your profile picture.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (result.canceled || !result.assets?.[0]) return;
+
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      const uri = result.assets[0].uri;
+
+      if (Platform.OS === 'web') {
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        formData.append('avatar', blob, 'avatar.jpg');
+      } else {
+        const ext = uri.split('.').pop() || 'jpg';
+        formData.append('avatar', {
+          uri,
+          type: `image/${ext === 'png' ? 'png' : 'jpeg'}`,
+          name: `avatar.${ext}`,
+        });
+      }
+
+      const { data } = await api.post('/profiles/me/avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+
+      updateUser({ avatarUrl: data.avatarUrl });
+    } catch (err) {
+      console.error('Avatar upload error:', err);
+      Alert.alert('Upload failed', 'Could not update your profile picture. Please try again.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.username}>{user?.username}</Text>
         <View style={styles.headerActions}>
+          <TouchableOpacity onPress={() => navigation.navigate('NotificationCenter')}>
+            <Ionicons name="notifications-outline" size={24} color={colors.primary} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate('GiftShop')}>
             <Ionicons name="diamond-outline" size={24} color={colors.tertiary} />
           </TouchableOpacity>
@@ -66,27 +125,48 @@ export default function MyProfileScreen({ navigation }) {
       </View>
 
       <View style={styles.profileSection}>
-        <View style={styles.avatarBorder}>
-          <View style={styles.avatarLarge}>
-            {user?.avatarUrl ? (
-              <Image source={{ uri: user.avatarUrl }} style={styles.avatarImage} />
-            ) : (
-              <Text style={styles.avatarLargeText}>
-                {(user?.username || '?')[0].toUpperCase()}
-              </Text>
-            )}
+        <TouchableOpacity onPress={pickAndUploadAvatar} activeOpacity={0.7}>
+          <View style={styles.avatarBorder}>
+            <View style={styles.avatarLarge}>
+              {uploadingAvatar ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : user?.avatarUrl ? (
+                <Image source={{ uri: user.avatarUrl }} style={styles.avatarImage} />
+              ) : (
+                <Text style={styles.avatarLargeText}>
+                  {(user?.username || '?')[0].toUpperCase()}
+                </Text>
+              )}
+            </View>
           </View>
-        </View>
+          <View style={styles.avatarCameraBadge}>
+            <Ionicons name="camera" size={14} color="#fff" />
+          </View>
+        </TouchableOpacity>
 
         <View style={styles.statsRow}>
-          <View style={styles.stat}>
+          <TouchableOpacity
+            style={styles.stat}
+            onPress={() => navigation.navigate('FollowList', {
+              userId: user?.id,
+              username: user?.username,
+              initialTab: 'following',
+            })}
+          >
             <Text style={styles.statNumber}>{stats.followingCount}</Text>
             <Text style={styles.statLabel}>Following</Text>
-          </View>
-          <View style={styles.stat}>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.stat}
+            onPress={() => navigation.navigate('FollowList', {
+              userId: user?.id,
+              username: user?.username,
+              initialTab: 'followers',
+            })}
+          >
             <Text style={styles.statNumber}>{stats.followerCount}</Text>
             <Text style={styles.statLabel}>Followers</Text>
-          </View>
+          </TouchableOpacity>
           <View style={styles.stat}>
             <Text style={styles.statNumber}>{stats.videoCount}</Text>
             <Text style={styles.statLabel}>Videos</Text>
@@ -111,10 +191,15 @@ export default function MyProfileScreen({ navigation }) {
         data={videos}
         numColumns={3}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.gridItem}>
-            {item.thumbnail_url ? (
-              <Image source={{ uri: item.thumbnail_url }} style={styles.gridImage} />
+        renderItem={({ item, index }) => (
+          <TouchableOpacity
+            style={styles.gridItem}
+            onPress={() => navigation.navigate('VideoPlayer', {
+              videos, startIndex: index,
+            })}
+          >
+            {item.thumbnailUrl ? (
+              <Image source={{ uri: item.thumbnailUrl }} style={styles.gridImage} />
             ) : (
               <View style={[styles.gridImage, styles.gridPlaceholder]}>
                 <Ionicons name="videocam" size={20} color={colors.textMuted} />
@@ -122,7 +207,7 @@ export default function MyProfileScreen({ navigation }) {
             )}
             <View style={styles.gridOverlay}>
               <Ionicons name="play" size={12} color="#fff" />
-              <Text style={styles.gridViews}>{item.view_count || 0}</Text>
+              <Text style={styles.gridViews}>{item.viewCount || 0}</Text>
             </View>
           </TouchableOpacity>
         )}
@@ -168,6 +253,19 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   avatarImage: { width: 76, height: 76, borderRadius: 38 },
+  avatarCameraBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primaryDim,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: colors.background,
+  },
   avatarLargeText: { color: colors.text, fontSize: fontSize.xxl, fontWeight: '700' },
   statsRow: {
     flexDirection: 'row',

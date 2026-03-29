@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import useAuthStore from './src/store/authStore';
+import { SnapCameraProvider } from './src/features/camera/SnapCameraProvider';
 
 // Error boundary to catch crashes and show error message instead of blank screen
 class ErrorBoundary extends React.Component {
@@ -45,7 +46,9 @@ export default function App() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
           <StatusBar style="light" />
-          <AppNavigator />
+          <SnapCameraProvider>
+            <AppNavigator />
+          </SnapCameraProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>
     </ErrorBoundary>

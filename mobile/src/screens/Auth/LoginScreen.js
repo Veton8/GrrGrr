@@ -29,7 +29,7 @@ export default function LoginScreen({ navigation }) {
     try {
       await login({ identifier: identifier.trim(), password });
     } catch (err) {
-      Alert.alert('Login Failed', err.response?.data?.error || 'Something went wrong');
+      Alert.alert('Login Failed', err.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }

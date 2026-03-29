@@ -1,12 +1,14 @@
 import axios from 'axios';
 import { Platform } from 'react-native';
 
-// Default dev server URL — update this if using a tunnel for phone testing
-const DEV_API = 'http://localhost:3000/api';
+// In dev, web uses localhost; native (phone) uses tunnel or LAN IP
+const LAN_IP = '192.168.1.5'; // <-- your PC's local IP
+const TUNNEL_URL = 'https://araeostyle-hypertechnically-louis.ngrok-free.dev'; // <-- ngrok tunnel for external access
 
 const getApiUrl = () => {
   if (!__DEV__) return 'https://api.grgr.app/api';
-  return DEV_API;
+  if (Platform.OS === 'web') return 'http://localhost:3000/api';
+  return `${TUNNEL_URL}/api`;
 };
 const API_URL = getApiUrl();
 
@@ -39,8 +41,11 @@ const deleteToken = async (key) => {
 
 const api = axios.create({
   baseURL: API_URL,
-  timeout: 10000,
-  headers: { 'Content-Type': 'application/json' },
+  timeout: 15000,
+  headers: {
+    'Content-Type': 'application/json',
+    'bypass-tunnel-reminder': 'true', // skip localtunnel interstitial
+  },
 });
 
 // Request interceptor — attach access token

@@ -9,8 +9,11 @@ import {
   Animated,
   Easing,
   useWindowDimensions,
+  Share,
+  ActionSheetIOS,
+  Alert,
 } from 'react-native';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, fontSize } from '../../utils/theme';
@@ -25,20 +28,30 @@ function formatCount(num) {
   return String(num);
 }
 
-export default function VideoCard({ video, isActive, navigation, cardHeight }) {
+export default function VideoCard({ video, isActive, navigation, cardHeight, source = 'fyp' }) {
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const videoRef = useRef(null);
   const spinAnim = useRef(new Animated.Value(0)).current;
   const spinAnimRef = useRef(null);
   const dotAnim = useRef(new Animated.Value(0.4)).current;
 
   const [isLiked, setIsLiked] = useState(video.isLiked || false);
   const [likeCount, setLikeCount] = useState(video.likeCount || 0);
+  const [shareCount, setShareCount] = useState(video.shareCount || 0);
   const [isFollowing, setIsFollowing] = useState(video.user?.isFollowing || false);
   const [isPaused, setIsPaused] = useState(false);
 
+  // Watch time tracking refs
+  const watchStartTime = useRef(null);
+  const accumulatedWatchTime = useRef(0);
+
   // Full window height since tab bar is absolute-positioned overlay
   const height = cardHeight || windowHeight;
+
+  /** Video player via expo-video */
+  const player = useVideoPlayer(video.videoUrl || null, (p) => {
+    p.loop = true;
+    p.muted = false;
+  });
 
   // Sync props when video changes
   useEffect(() => {
@@ -49,17 +62,77 @@ export default function VideoCard({ video, isActive, navigation, cardHeight }) {
 
   // Video play/pause
   useEffect(() => {
-    if (videoRef.current) {
+    if (!player) return;
+    try {
       if (isActive && !isPaused) {
-        videoRef.current.playAsync().catch(() => {});
+        player.play();
       } else {
-        videoRef.current.pauseAsync().catch(() => {});
+        player.pause();
         if (!isActive) {
-          videoRef.current.setPositionAsync(0).catch(() => {});
+          player.currentTime = 0;
         }
       }
+    } catch {}
+  }, [isActive, isPaused, player]);
+
+  // Watch time tracking
+  useEffect(() => {
+    if (isActive) {
+      watchStartTime.current = Date.now();
+    } else {
+      // Video left view — calculate and send watch time
+      if (watchStartTime.current) {
+        const elapsed = Date.now() - watchStartTime.current;
+        accumulatedWatchTime.current += elapsed;
+        watchStartTime.current = null;
+      }
+
+      // Send view event if we accumulated enough time
+      const totalMs = accumulatedWatchTime.current;
+      if (totalMs >= 1000 && video.id) {
+        // Fire and forget — don't block UI
+        api.post(`/feed/${video.id}/view`, {
+          watchDurationMs: totalMs,
+          source,
+        }).catch(() => {}); // Silently fail
+      }
+
+      // Reset for next time this video becomes active
+      accumulatedWatchTime.current = 0;
     }
-  }, [isActive, isPaused]);
+
+    // Cleanup on unmount
+    return () => {
+      if (watchStartTime.current) {
+        const elapsed = Date.now() - watchStartTime.current;
+        accumulatedWatchTime.current += elapsed;
+        watchStartTime.current = null;
+      }
+      const totalMs = accumulatedWatchTime.current;
+      if (totalMs >= 1000 && video.id) {
+        api.post(`/feed/${video.id}/view`, {
+          watchDurationMs: totalMs,
+          source,
+        }).catch(() => {});
+      }
+    };
+  }, [isActive, video.id, source]);
+
+  // Handle pause/unpause for watch time
+  useEffect(() => {
+    if (!isActive) return;
+
+    if (isPaused) {
+      // Paused — save elapsed time
+      if (watchStartTime.current) {
+        accumulatedWatchTime.current += Date.now() - watchStartTime.current;
+        watchStartTime.current = null;
+      }
+    } else {
+      // Resumed — restart timer
+      watchStartTime.current = Date.now();
+    }
+  }, [isPaused, isActive]);
 
   // Spinning disc animation
   useEffect(() => {
@@ -146,6 +219,80 @@ export default function VideoCard({ video, isActive, navigation, cardHeight }) {
     }
   }, [isFollowing, video.user?.id]);
 
+  const handleShare = useCallback(async () => {
+    const shareUrl = `https://grgr.app/v/${video.id}`;
+    const shareMessage = video.caption
+      ? `Check out this video by @${video.user?.username}: "${video.caption}" ${shareUrl}`
+      : `Check out this video by @${video.user?.username} on Grgr! ${shareUrl}`;
+
+    const options = ['Share to external app', 'Send to friend', 'Cancel'];
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        { options, cancelButtonIndex: 2 },
+        async (buttonIndex) => {
+          if (buttonIndex === 0) {
+            try {
+              await Share.share({ message: shareMessage, url: shareUrl });
+              api.post(`/feed/${video.id}/share`).then(({ data }) => setShareCount(data.shareCount)).catch(() => {});
+            } catch {}
+          } else if (buttonIndex === 1) {
+            navigation.navigate('ContactPicker', {
+              onSelect: async (user) => {
+                try {
+                  const { data: conv } = await api.post('/messages', { participantId: user.id });
+                  await api.post(`/messages/${conv.id}/messages`, {
+                    type: 'video_share',
+                    content: `Shared a video by @${video.user?.username}`,
+                    metadata: { videoId: video.id, thumbnailUrl: video.thumbnailUrl, username: video.user?.username, caption: video.caption },
+                  });
+                  api.post(`/feed/${video.id}/share`).then(({ data }) => setShareCount(data.shareCount)).catch(() => {});
+                  Alert.alert('Sent!', `Video shared with @${user.username}`);
+                } catch {
+                  Alert.alert('Error', 'Could not send video');
+                }
+              },
+            });
+          }
+        },
+      );
+    } else {
+      Alert.alert('Share', 'How would you like to share?', [
+        {
+          text: 'Share to external app',
+          onPress: async () => {
+            try {
+              await Share.share({ message: shareMessage });
+              api.post(`/feed/${video.id}/share`).then(({ data }) => setShareCount(data.shareCount)).catch(() => {});
+            } catch {}
+          },
+        },
+        {
+          text: 'Send to friend',
+          onPress: () => {
+            navigation.navigate('ContactPicker', {
+              onSelect: async (user) => {
+                try {
+                  const { data: conv } = await api.post('/messages', { participantId: user.id });
+                  await api.post(`/messages/${conv.id}/messages`, {
+                    type: 'video_share',
+                    content: `Shared a video by @${video.user?.username}`,
+                    metadata: { videoId: video.id, thumbnailUrl: video.thumbnailUrl, username: video.user?.username, caption: video.caption },
+                  });
+                  api.post(`/feed/${video.id}/share`).then(({ data }) => setShareCount(data.shareCount)).catch(() => {});
+                  Alert.alert('Sent!', `Video shared with @${user.username}`);
+                } catch {
+                  Alert.alert('Error', 'Could not send video');
+                }
+              },
+            });
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  }, [video, navigation]);
+
   const handleTapVideo = () => {
     setIsPaused((prev) => !prev);
   };
@@ -158,24 +305,16 @@ export default function VideoCard({ video, isActive, navigation, cardHeight }) {
         style={StyleSheet.absoluteFill}
       >
         {video.videoUrl ? (
-          <View style={{ width: '100%', height: '100%', overflow: 'hidden', backgroundColor: '#000' }}>
-            <Video
-              ref={videoRef}
-              source={{ uri: video.videoUrl }}
-              style={{
-                width: '100%',
-                height: '100%',
-                ...(Platform.OS === 'web' ? { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 } : {}),
-              }}
-              videoStyle={Platform.OS === 'web' ? { width: '100%', height: '100%', objectFit: 'cover' } : undefined}
-              resizeMode={ResizeMode.COVER}
-              isLooping
-              shouldPlay={isActive && !isPaused}
-              isMuted={false}
+          <View style={{ width: windowWidth, height, overflow: 'hidden', backgroundColor: '#000' }}>
+            <VideoView
+              player={player}
+              style={{ width: windowWidth, height, position: 'absolute', top: 0, left: 0 }}
+              contentFit="contain"
+              nativeControls={false}
             />
           </View>
         ) : (
-          <View style={[{ width: '100%', height: '100%' }, styles.placeholder]}>
+          <View style={[{ width: windowWidth, height }, styles.placeholder]}>
             <Ionicons name="videocam-outline" size={48} color={colors.textMuted} />
           </View>
         )}
@@ -230,12 +369,11 @@ export default function VideoCard({ video, isActive, navigation, cardHeight }) {
             >
               <Text style={styles.username}>@{video.user?.username}</Text>
             </TouchableOpacity>
-            <View style={styles.watchingRow}>
-              <Animated.View style={[styles.liveDot, { opacity: dotAnim }]} />
-              <Text style={styles.watchingText}>
-                {video.viewCount ? formatCount(video.viewCount) : '0'} watching
+            {video.viewCount > 0 && (
+              <Text style={styles.viewCountText}>
+                {formatCount(video.viewCount)} views
               </Text>
-            </View>
+            )}
           </View>
         </View>
 
@@ -281,11 +419,11 @@ export default function VideoCard({ video, isActive, navigation, cardHeight }) {
         </TouchableOpacity>
 
         {/* Share */}
-        <TouchableOpacity style={styles.sidebarItem}>
+        <TouchableOpacity style={styles.sidebarItem} onPress={handleShare}>
           <View style={styles.actionCircle}>
             <Ionicons name="share-social" size={24} color="#fff" />
           </View>
-          <Text style={styles.sidebarCount}>{formatCount(video.shareCount || 0)}</Text>
+          <Text style={styles.sidebarCount}>{formatCount(shareCount)}</Text>
         </TouchableOpacity>
 
         {/* Gift */}
@@ -440,6 +578,12 @@ const styles = StyleSheet.create({
     fontSize: fontSize.xs,
     fontWeight: '600',
     letterSpacing: 0.3,
+  },
+  viewCountText: {
+    color: colors.textSecondary,
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+    marginTop: 2,
   },
   caption: {
     color: colors.onSurfaceVariant,

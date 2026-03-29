@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../services/api';
 import { colors, spacing, fontSize } from '../../utils/theme';
@@ -21,10 +22,13 @@ export default function ProfileScreen({ route, navigation }) {
   const [profile, setProfile] = useState(null);
   const [videos, setVideos] = useState([]);
 
-  useEffect(() => {
-    fetchProfile();
-    fetchVideos();
-  }, [username]);
+  // Re-fetch profile & videos every time the screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+      fetchVideos();
+    }, [username])
+  );
 
   const fetchProfile = async () => {
     try {
@@ -89,14 +93,28 @@ export default function ProfileScreen({ route, navigation }) {
         </View>
 
         <View style={styles.statsRow}>
-          <View style={styles.stat}>
+          <TouchableOpacity
+            style={styles.stat}
+            onPress={() => navigation.navigate('FollowList', {
+              userId: profile.id,
+              username: profile.username,
+              initialTab: 'following',
+            })}
+          >
             <Text style={styles.statNumber}>{profile.followingCount}</Text>
             <Text style={styles.statLabel}>Following</Text>
-          </View>
-          <View style={styles.stat}>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.stat}
+            onPress={() => navigation.navigate('FollowList', {
+              userId: profile.id,
+              username: profile.username,
+              initialTab: 'followers',
+            })}
+          >
             <Text style={styles.statNumber}>{profile.followerCount}</Text>
             <Text style={styles.statLabel}>Followers</Text>
-          </View>
+          </TouchableOpacity>
           <View style={styles.stat}>
             <Text style={styles.statNumber}>{profile.videoCount}</Text>
             <Text style={styles.statLabel}>Videos</Text>
@@ -128,6 +146,27 @@ export default function ProfileScreen({ route, navigation }) {
               {profile.isFollowing ? 'Following' : 'Follow'}
             </Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.messageButton}
+            onPress={async () => {
+              try {
+                const { data } = await api.post('/messages', { participantId: profile.id });
+                navigation.navigate('Chat', {
+                  conversationId: data.id,
+                  otherUser: {
+                    id: profile.id,
+                    username: profile.username,
+                    displayName: profile.displayName,
+                    avatarUrl: profile.avatarUrl,
+                  },
+                });
+              } catch (err) {
+                console.error(err);
+              }
+            }}
+          >
+            <Ionicons name="chatbubble-outline" size={16} color="#fff" />
+          </TouchableOpacity>
           {profile.isLive && (
             <TouchableOpacity
               style={styles.liveButton}
@@ -144,15 +183,24 @@ export default function ProfileScreen({ route, navigation }) {
         data={videos}
         numColumns={3}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.gridItem}>
-            {item.thumbnail_url ? (
-              <Image source={{ uri: item.thumbnail_url }} style={styles.gridImage} />
+        renderItem={({ item, index }) => (
+          <TouchableOpacity
+            style={styles.gridItem}
+            onPress={() => navigation.navigate('VideoPlayer', {
+              videos, startIndex: index,
+            })}
+          >
+            {item.thumbnailUrl ? (
+              <Image source={{ uri: item.thumbnailUrl }} style={styles.gridImage} />
             ) : (
               <View style={[styles.gridImage, styles.gridPlaceholder]}>
                 <Ionicons name="videocam" size={20} color={colors.textMuted} />
               </View>
             )}
+            <View style={styles.gridOverlay}>
+              <Ionicons name="play" size={12} color="#fff" />
+              <Text style={styles.gridViews}>{item.viewCount || 0}</Text>
+            </View>
           </TouchableOpacity>
         )}
       />
@@ -216,6 +264,14 @@ const styles = StyleSheet.create({
   },
   followButtonText: { color: '#fff', fontWeight: '700' },
   followingButtonText: { color: colors.textSecondary },
+  messageButton: {
+    backgroundColor: colors.surfaceLight,
+    borderRadius: 8,
+    padding: spacing.sm,
+    paddingHorizontal: spacing.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   liveButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -229,4 +285,13 @@ const styles = StyleSheet.create({
   gridItem: { width: GRID_SIZE, height: GRID_SIZE, padding: 1 },
   gridImage: { width: '100%', height: '100%' },
   gridPlaceholder: { backgroundColor: colors.surface, justifyContent: 'center', alignItems: 'center' },
+  gridOverlay: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  gridViews: { color: '#fff', fontSize: 10, fontWeight: '600' },
 });

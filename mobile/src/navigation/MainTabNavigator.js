@@ -1,17 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { View, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { View, TouchableOpacity, StyleSheet, Platform, Modal, Text, Pressable } from 'react-native';
 import FeedScreen from '../screens/Feed/FeedScreen';
 import DiscoverScreen from '../screens/Feed/DiscoverScreen';
-import LiveListScreen from '../screens/Live/LiveListScreen';
 import InboxScreen from '../screens/Profile/InboxScreen';
 import MyProfileScreen from '../screens/Profile/MyProfileScreen';
-import { colors } from '../utils/theme';
+import useMessageStore from '../store/messageStore';
+import { colors, spacing, fontSize } from '../utils/theme';
 
 const Tab = createBottomTabNavigator();
 
-function GoLiveButton({ onPress }) {
+function CreateButton({ onPress }) {
   return (
     <TouchableOpacity style={styles.goLiveButton} onPress={onPress} activeOpacity={0.8}>
       <View style={styles.goLiveGlow}>
@@ -24,7 +24,18 @@ function GoLiveButton({ onPress }) {
 }
 
 export default function MainTabNavigator({ navigation }) {
+  const [showCreateMenu, setShowCreateMenu] = useState(false);
+  const unreadTotal = useMessageStore((s) => s.unreadTotal);
+
   return (
+    <>
+    <CreateMenu
+      visible={showCreateMenu}
+      onClose={() => setShowCreateMenu(false)}
+      onRecord={() => { setShowCreateMenu(false); navigation.navigate('RecordVideo'); }}
+      onUpload={() => { setShowCreateMenu(false); navigation.navigate('UploadVideo'); }}
+      onGoLive={() => { setShowCreateMenu(false); navigation.navigate('GoLive'); }}
+    />
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
@@ -71,25 +82,32 @@ export default function MainTabNavigator({ navigation }) {
         options={{
           tabBarLabel: () => null,
           tabBarButton: (props) => (
-            <GoLiveButton {...props} onPress={() => navigation.navigate('GoLive')} />
+            <CreateButton {...props} onPress={() => setShowCreateMenu(true)} />
           ),
         }}
       />
       <Tab.Screen
-        name="Live"
-        component={LiveListScreen}
+        name="Messages"
+        component={InboxScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="radio-outline" size={size} color={color} />
+            <Ionicons name="chatbubble-outline" size={size} color={color} />
           ),
-          tabBarBadge: '',
-          tabBarBadgeStyle: {
-            backgroundColor: colors.primaryDim,
-            minWidth: 8,
-            maxHeight: 8,
-            borderRadius: 4,
-            top: 6,
-          },
+          ...(unreadTotal > 0
+            ? {
+                tabBarBadge: unreadTotal > 99 ? '99+' : unreadTotal,
+                tabBarBadgeStyle: {
+                  backgroundColor: colors.secondary,
+                  color: colors.background,
+                  fontSize: 10,
+                  fontWeight: '700',
+                  minWidth: 18,
+                  height: 18,
+                  borderRadius: 9,
+                  top: 2,
+                },
+              }
+            : {}),
         }}
       />
       <Tab.Screen
@@ -102,6 +120,48 @@ export default function MainTabNavigator({ navigation }) {
         }}
       />
     </Tab.Navigator>
+    </>
+  );
+}
+
+function CreateMenu({ visible, onClose, onRecord, onUpload, onGoLive }) {
+  if (!visible) return null;
+  return (
+    <Modal transparent animationType="fade" visible={visible} onRequestClose={onClose}>
+      <Pressable style={styles.menuOverlay} onPress={onClose}>
+        <View style={styles.menuContainer}>
+          <TouchableOpacity style={styles.menuItem} onPress={onRecord} activeOpacity={0.7}>
+            <View style={[styles.menuIcon, { backgroundColor: 'rgba(255, 45, 85, 0.15)' }]}>
+              <Ionicons name="camera" size={24} color="#FF6B8A" />
+            </View>
+            <View>
+              <Text style={styles.menuTitle}>Record Video</Text>
+              <Text style={styles.menuSubtitle}>Shoot with camera</Text>
+            </View>
+          </TouchableOpacity>
+          <View style={styles.menuDivider} />
+          <TouchableOpacity style={styles.menuItem} onPress={onUpload} activeOpacity={0.7}>
+            <View style={[styles.menuIcon, { backgroundColor: 'rgba(170, 48, 250, 0.2)' }]}>
+              <Ionicons name="cloud-upload" size={24} color={colors.primary} />
+            </View>
+            <View>
+              <Text style={styles.menuTitle}>Upload Video</Text>
+              <Text style={styles.menuSubtitle}>Post from camera roll</Text>
+            </View>
+          </TouchableOpacity>
+          <View style={styles.menuDivider} />
+          <TouchableOpacity style={styles.menuItem} onPress={onGoLive} activeOpacity={0.7}>
+            <View style={[styles.menuIcon, { backgroundColor: 'rgba(255, 45, 85, 0.2)' }]}>
+              <Ionicons name="radio" size={24} color={colors.error} />
+            </View>
+            <View>
+              <Text style={styles.menuTitle}>Go Live</Text>
+              <Text style={styles.menuSubtitle}>Start a livestream</Text>
+            </View>
+          </TouchableOpacity>
+        </View>
+      </Pressable>
+    </Modal>
   );
 }
 
@@ -136,5 +196,47 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 12,
     elevation: 8,
+  },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+    paddingBottom: Platform.OS === 'web' ? 90 : 110,
+    paddingHorizontal: spacing.xl,
+  },
+  menuContainer: {
+    backgroundColor: colors.surfaceContainer,
+    borderRadius: 20,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  menuIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuTitle: {
+    color: colors.text,
+    fontSize: fontSize.lg,
+    fontWeight: '700',
+  },
+  menuSubtitle: {
+    color: colors.textMuted,
+    fontSize: fontSize.sm,
+    marginTop: 2,
+  },
+  menuDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginHorizontal: spacing.md,
   },
 });

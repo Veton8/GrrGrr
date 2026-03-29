@@ -52,7 +52,7 @@ export default function RegisterScreen({ navigation }) {
         displayName: username.trim(),
       });
     } catch (err) {
-      Alert.alert('Registration Failed', err.response?.data?.error || 'Something went wrong');
+      Alert.alert('Registration Failed', err.message || 'Something went wrong');
     } finally {
       setLoading(false);
     }

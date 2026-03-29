@@ -29,10 +29,12 @@
     },
     "plugins": [
       "expo-camera",
-      "expo-av",
+      "expo-video",
       "expo-image-picker",
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      "expo-audio",
+      "expo-notifications"
     ]
   }
 }

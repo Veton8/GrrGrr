@@ -13,7 +13,14 @@ const nativeOnlyModules = [
   '@shopify/react-native-skia',
   'react-native-worklets',
   'react-native-worklets-core',
+  '@snap/camera-kit-react-native',
 ];
+
+// Packages that use .mjs exports and need explicit CJS resolution
+const mjsPackageMap = {
+  '@livekit/components-react': path.resolve(__dirname, 'node_modules', '@livekit', 'components-react', 'dist', 'index.js'),
+  'livekit-client': path.resolve(__dirname, 'node_modules', 'livekit-client', 'dist', 'livekit-client.umd.js'),
+};
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   // Shim reanimated on all platforms (package uninstalled, provide stub)
@@ -27,6 +34,11 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
         return { type: 'empty' };
       }
     }
+  }
+
+  // Resolve .mjs packages to their CJS equivalents (since .mjs is excluded from sourceExts)
+  if (mjsPackageMap[moduleName]) {
+    return { filePath: mjsPackageMap[moduleName], type: 'sourceFile' };
   }
 
   return context.resolveRequest(context, moduleName, platform);

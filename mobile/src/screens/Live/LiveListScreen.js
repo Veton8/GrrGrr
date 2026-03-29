@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,68 +9,15 @@ import {
   Platform,
   Animated,
   Easing,
+  RefreshControl,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Video, ResizeMode } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, spacing, fontSize } from '../../utils/theme';
-
-const MOCK_STREAMS = [
-  {
-    id: 'live-1',
-    hostName: 'DJ_Sparkle',
-    title: 'Late Night Vibes',
-    viewers: '1.2K',
-    bgColor: '#E91E63',
-    hostInitial: 'D',
-    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-  },
-  {
-    id: 'live-2',
-    hostName: 'CookWithMaya',
-    title: 'Making Pasta from Scratch!',
-    viewers: '567',
-    bgColor: '#FF9800',
-    hostInitial: 'C',
-    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4',
-  },
-  {
-    id: 'live-3',
-    hostName: 'FitnessPro',
-    title: 'Morning Workout HIIT',
-    viewers: '234',
-    bgColor: '#4CAF50',
-    hostInitial: 'F',
-    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4',
-  },
-  {
-    id: 'live-4',
-    hostName: 'ArtByLuna',
-    title: 'Painting Session',
-    viewers: '892',
-    bgColor: '#9C27B0',
-    hostInitial: 'A',
-    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
-  },
-  {
-    id: 'live-5',
-    hostName: 'GamerX',
-    title: 'Ranked Matches',
-    viewers: '3.4K',
-    bgColor: '#2196F3',
-    hostInitial: 'G',
-    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerMeltdowns.mp4',
-  },
-  {
-    id: 'live-6',
-    hostName: 'TravelWithSam',
-    title: 'Exploring Tokyo Streets',
-    viewers: '1.8K',
-    bgColor: '#00BCD4',
-    hostInitial: 'T',
-    videoUrl: 'https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4',
-  },
-];
+import api from '../../services/api';
 
 // Pulsing dot for LIVE badge
 function PulsingDot() {
@@ -100,9 +47,57 @@ function PulsingDot() {
   );
 }
 
+function formatViewerCount(count) {
+  if (count >= 1000) return `${(count / 1000).toFixed(1)}K`;
+  return String(count);
+}
+
+// Random gradient-like colors for cards without thumbnails
+const BG_COLORS = ['#E91E63', '#FF9800', '#4CAF50', '#9C27B0', '#2196F3', '#00BCD4', '#FF5722', '#673AB7'];
+
 export default function LiveListScreen({ navigation }) {
   const { width } = useWindowDimensions();
   const cardWidth = (width - spacing.md * 3) / 2;
+  const [streams, setStreams] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchStreams = useCallback(async () => {
+    try {
+      const { data } = await api.get('/live');
+      setStreams(data);
+    } catch (err) {
+      console.warn('Failed to fetch live streams:', err.message);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  // Fetch on mount + refetch when screen gains focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchStreams();
+    }, [fetchStreams])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchStreams();
+  };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Live Now</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -122,99 +117,134 @@ export default function LiveListScreen({ navigation }) {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+        }
       >
-        {/* Stream grid */}
-        <View style={styles.grid}>
-          {MOCK_STREAMS.map((stream) => (
+        {streams.length === 0 ? (
+          /* Empty state */
+          <View style={styles.emptyState}>
+            <Ionicons name="radio-outline" size={56} color={colors.textMuted} />
+            <Text style={styles.emptyTitle}>No one is live right now</Text>
+            <Text style={styles.emptySubtitle}>Be the first to go live and grow your audience!</Text>
             <TouchableOpacity
-              key={stream.id}
-              style={[styles.card, { width: cardWidth }]}
+              style={styles.emptyGoLiveBtn}
+              onPress={() => navigation.navigate('GoLive')}
               activeOpacity={0.8}
-              onPress={() =>
-                navigation.navigate('LiveStream', {
-                  streamId: stream.id,
-                  hostName: stream.hostName,
-                })
-              }
             >
-              {/* Thumbnail with video preview */}
-              <View
-                style={[
-                  styles.thumbnail,
-                  { height: cardWidth * 1.3, backgroundColor: stream.bgColor },
-                ]}
-              >
-                <Video
-                  source={{ uri: stream.videoUrl }}
-                  style={StyleSheet.absoluteFill}
-                  resizeMode={ResizeMode.COVER}
-                  videoStyle={Platform.OS === 'web' ? { width: '100%', height: '100%', objectFit: 'cover' } : undefined}
-                  isLooping
-                  shouldPlay
-                  isMuted
+              <Ionicons name="radio" size={18} color="#fff" />
+              <Text style={styles.emptyGoLiveText}>Start Streaming</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Stream grid */}
+            <View style={styles.grid}>
+              {streams.map((stream, index) => {
+                const bgColor = BG_COLORS[index % BG_COLORS.length];
+                const host = stream.host || {};
+                const initial = (host.username || '?')[0].toUpperCase();
+
+                return (
+                  <TouchableOpacity
+                    key={stream.id}
+                    style={[styles.card, { width: cardWidth }]}
+                    activeOpacity={0.8}
+                    onPress={() =>
+                      navigation.navigate('LiveStream', {
+                        streamId: stream.id,
+                        hostName: host.username,
+                      })
+                    }
+                  >
+                    {/* Thumbnail */}
+                    <View
+                      style={[
+                        styles.thumbnail,
+                        { height: cardWidth * 1.3, backgroundColor: bgColor },
+                      ]}
+                    >
+                      {stream.thumbnailUrl ? (
+                        <Image
+                          source={{ uri: stream.thumbnailUrl }}
+                          style={StyleSheet.absoluteFill}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View style={[StyleSheet.absoluteFill, { justifyContent: 'center', alignItems: 'center' }]}>
+                          <Ionicons name="radio" size={40} color="rgba(255,255,255,0.3)" />
+                        </View>
+                      )}
+
+                      {/* Darker overlay */}
+                      <View style={styles.thumbnailOverlay} />
+
+                      {/* LIVE badge */}
+                      <View style={styles.liveBadge}>
+                        <PulsingDot />
+                        <Text style={styles.liveText}>LIVE</Text>
+                      </View>
+
+                      {/* Viewer count */}
+                      <View style={styles.viewerBadge}>
+                        <Ionicons name="eye" size={11} color={colors.text} />
+                        <Text style={styles.viewerText}>
+                          {formatViewerCount(stream.viewerCount || 0)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Card info */}
+                    <View style={styles.cardInfo}>
+                      <View style={[styles.hostAvatar, { backgroundColor: bgColor }]}>
+                        {host.avatarUrl ? (
+                          <Image
+                            source={{ uri: host.avatarUrl }}
+                            style={{ width: 28, height: 28, borderRadius: 14 }}
+                          />
+                        ) : (
+                          <Text style={styles.hostAvatarText}>{initial}</Text>
+                        )}
+                      </View>
+                      <View style={styles.cardMeta}>
+                        <Text style={styles.hostName} numberOfLines={1}>
+                          {host.username || 'Unknown'}
+                        </Text>
+                        <Text style={styles.streamTitle} numberOfLines={1}>
+                          {stream.title || 'Livestream'}
+                        </Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* Battle card */}
+            <TouchableOpacity
+              style={styles.battleCard}
+              activeOpacity={0.8}
+              onPress={() => navigation.navigate('Battle', { battleId: 'demo' })}
+            >
+              <View style={styles.battleContent}>
+                <View style={styles.battleIconContainer}>
+                  <Ionicons name="flash" size={26} color={colors.tertiary} />
+                </View>
+                <View style={styles.battleInfo}>
+                  <Text style={styles.battleTitle}>Live Battle</Text>
+                  <Text style={styles.battleSubtitle}>
+                    Watch creators compete in real-time!
+                  </Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={22}
+                  color={colors.textMuted}
                 />
-
-                {/* Darker overlay for depth */}
-                <View style={styles.thumbnailOverlay} />
-
-                {/* LIVE badge */}
-                <View style={styles.liveBadge}>
-                  <PulsingDot />
-                  <Text style={styles.liveText}>LIVE</Text>
-                </View>
-
-                {/* Viewer count */}
-                <View style={styles.viewerBadge}>
-                  <Ionicons name="eye" size={11} color={colors.text} />
-                  <Text style={styles.viewerText}>{stream.viewers}</Text>
-                </View>
-              </View>
-
-              {/* Card info */}
-              <View style={styles.cardInfo}>
-                <View
-                  style={[styles.hostAvatar, { backgroundColor: stream.bgColor }]}
-                >
-                  <Text style={styles.hostAvatarText}>
-                    {stream.hostInitial}
-                  </Text>
-                </View>
-                <View style={styles.cardMeta}>
-                  <Text style={styles.hostName} numberOfLines={1}>
-                    {stream.hostName}
-                  </Text>
-                  <Text style={styles.streamTitle} numberOfLines={1}>
-                    {stream.title}
-                  </Text>
-                </View>
               </View>
             </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Battle card */}
-        <TouchableOpacity
-          style={styles.battleCard}
-          activeOpacity={0.8}
-          onPress={() => navigation.navigate('Battle', { battleId: 'demo' })}
-        >
-          <View style={styles.battleContent}>
-            <View style={styles.battleIconContainer}>
-              <Ionicons name="flash" size={26} color={colors.tertiary} />
-            </View>
-            <View style={styles.battleInfo}>
-              <Text style={styles.battleTitle}>Live Battle</Text>
-              <Text style={styles.battleSubtitle}>
-                Watch creators compete in real-time!
-              </Text>
-            </View>
-            <Ionicons
-              name="chevron-forward"
-              size={22}
-              color={colors.textMuted}
-            />
-          </View>
-        </TouchableOpacity>
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -224,6 +254,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   // Header
   header: {
@@ -261,6 +296,42 @@ const styles = StyleSheet.create({
   // Scroll content
   scrollContent: {
     paddingBottom: spacing.xxl + 60,
+  },
+  // Empty state
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 80,
+    paddingHorizontal: spacing.xl,
+    gap: spacing.sm,
+  },
+  emptyTitle: {
+    color: colors.text,
+    fontSize: fontSize.xl,
+    fontWeight: '700',
+    marginTop: spacing.md,
+  },
+  emptySubtitle: {
+    color: colors.textMuted,
+    fontSize: fontSize.md,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  emptyGoLiveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: colors.primaryDim,
+    borderRadius: 28,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    marginTop: spacing.lg,
+  },
+  emptyGoLiveText: {
+    color: '#fff',
+    fontSize: fontSize.md,
+    fontWeight: '700',
   },
   // Grid
   grid: {
@@ -342,6 +413,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1.5,
     borderColor: 'rgba(255,255,255,0.15)',
+    overflow: 'hidden',
   },
   hostAvatarText: {
     color: '#fff',

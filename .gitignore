@@ -10,6 +10,12 @@ Thumbs.db
 *.db
 *.db-shm
 *.db-wal
+/backend/uploads/videos/
+/backend/uploads/thumbnails/
+/backend/uploads/avatars/
+/backend/uploads/processed/
 .claude/
+# Snap Camera Kit credentials (contains API tokens)
+mobile/src/config/snapKit.js
 /mobile/node_modules/.cache/
 /tmp/

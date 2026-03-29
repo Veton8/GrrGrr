@@ -29,18 +29,6 @@ const storage = {
   },
 };
 
-// Mock user for offline/fallback testing
-const MOCK_USER = {
-  id: 'mock-user-001',
-  email: 'demo@grgr.app',
-  username: 'demouser',
-  displayName: 'Demo User',
-  avatarUrl: null,
-  bio: 'Just vibing on Grgr!',
-  coinBalance: 10000000,
-  createdAt: new Date().toISOString(),
-};
-
 const useAuthStore = create((set, get) => ({
   user: null,
   isAuthenticated: false,
@@ -50,25 +38,34 @@ const useAuthStore = create((set, get) => ({
     try {
       const token = await storage.getItem('accessToken');
       if (token) {
+        // Detect stale mock tokens and clear them
+        if (token.startsWith('mock-token-')) {
+          console.log('Clearing stale mock token — please log in again.');
+          await storage.deleteItem('accessToken');
+          await storage.deleteItem('refreshToken');
+          await storage.deleteItem('mockSession');
+          set({ user: null, isAuthenticated: false, isLoading: false });
+          return;
+        }
         try {
           const { data } = await api.get('/auth/me');
           set({ user: data, isAuthenticated: true, isLoading: false });
           return;
         } catch (err) {
-          // API unreachable — check if we have a stored mock session
-          const mockSession = await storage.getItem('mockSession');
-          if (mockSession) {
-            set({ user: JSON.parse(mockSession), isAuthenticated: true, isLoading: false });
-            return;
-          }
+          // Token invalid or expired and refresh also failed — force re-login
+          console.log('Auth validation failed:', err?.message);
+          await storage.deleteItem('accessToken');
+          await storage.deleteItem('refreshToken');
+          await storage.deleteItem('mockSession');
         }
       }
-      set({ isLoading: false });
+      set({ user: null, isAuthenticated: false, isLoading: false });
     } catch (err) {
       console.log('Auth init error:', err?.message || err);
       try {
         await storage.deleteItem('accessToken');
         await storage.deleteItem('refreshToken');
+        await storage.deleteItem('mockSession');
       } catch {}
       set({ user: null, isAuthenticated: false, isLoading: false });
     }
@@ -84,18 +81,13 @@ const useAuthStore = create((set, get) => ({
       set({ user: data.user, isAuthenticated: true });
       return data;
     } catch (err) {
-      // Fallback: create mock session so user can still test the app
-      console.log('Register API failed, using mock:', err?.message);
-      const mockUser = {
-        ...MOCK_USER,
-        username: username || 'newuser',
-        displayName: displayName || username || 'New User',
-        email: email || 'user@grgr.app',
-      };
-      await storage.setItem('accessToken', 'mock-token-' + Date.now());
-      await storage.setItem('mockSession', JSON.stringify(mockUser));
-      set({ user: mockUser, isAuthenticated: true });
-      return { user: mockUser };
+      const message =
+        err.response?.data?.error ||
+        err.response?.data?.message ||
+        (err.message === 'Network Error'
+          ? 'Cannot reach server. Make sure the backend is running and your device is on the same network.'
+          : 'Registration failed. Please try again.');
+      throw new Error(message);
     }
   },
 
@@ -108,17 +100,13 @@ const useAuthStore = create((set, get) => ({
       set({ user: data.user, isAuthenticated: true });
       return data;
     } catch (err) {
-      // Fallback: accept any credentials and create mock session
-      console.log('Login API failed, using mock:', err?.message);
-      const mockUser = {
-        ...MOCK_USER,
-        username: identifier || 'demouser',
-        displayName: identifier ? identifier.charAt(0).toUpperCase() + identifier.slice(1) : 'Demo User',
-      };
-      await storage.setItem('accessToken', 'mock-token-' + Date.now());
-      await storage.setItem('mockSession', JSON.stringify(mockUser));
-      set({ user: mockUser, isAuthenticated: true });
-      return { user: mockUser };
+      const message =
+        err.response?.data?.error ||
+        err.response?.data?.message ||
+        (err.message === 'Network Error'
+          ? 'Cannot reach server. Make sure the backend is running and your device is on the same network.'
+          : 'Login failed. Please try again.');
+      throw new Error(message);
     }
   },
 

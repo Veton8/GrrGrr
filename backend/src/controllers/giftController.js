@@ -1,5 +1,6 @@
 const { sqlite } = require('../config/database');
 const { v4: uuidv4 } = require('uuid');
+const { queueNotification } = require('../services/notificationAggregator');
 
 async function getGifts(req, res, next) {
   try {
@@ -37,6 +38,14 @@ async function sendGift(req, res, next) {
       }
     });
     processGift();
+
+    // Notify the gift receiver
+    queueNotification(receiverId, {
+      type: 'gift_received',
+      title: 'You received a gift!',
+      body: `${req.user.username} sent you ${quantity}x ${gift.name} (${totalCost} coins)`,
+      data: { giftId, giftName: gift.name, senderId: req.user.id, senderUsername: req.user.username, quantity, totalCost },
+    });
 
     res.json({
       message: 'Gift sent',

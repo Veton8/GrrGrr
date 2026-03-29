@@ -2,6 +2,7 @@ const { Server } = require('socket.io');
 const jwt = require('jsonwebtoken');
 const { redisClient } = require('../config/redis');
 const { sqlite } = require('../config/database');
+const { quickCheck } = require('../services/textModerator');
 
 function setupWebSocket(server) {
   const io = new Server(server, {
@@ -50,14 +51,15 @@ function setupWebSocket(server) {
       liveNsp.to(streamId).emit('viewer-count', { streamId, count: safeCount });
     });
 
-    // Live chat message
+    // Live chat message — with profanity filtering
     socket.on('chat-message', (data) => {
       if (!socket.user) return;
+      const { cleaned } = quickCheck(data.message);
       liveNsp.to(data.streamId).emit('chat-message', {
         id: Date.now().toString(),
         userId: socket.user.id,
         username: socket.user.username,
-        message: data.message,
+        message: cleaned,
         timestamp: new Date().toISOString(),
       });
     });
@@ -97,7 +99,81 @@ function setupWebSocket(server) {
     });
   });
 
+  // ─── Direct Messages namespace ──────────────────────────────────────────────
+  const messagesNsp = io.of('/messages');
+
+  messagesNsp.use((socket, next) => {
+    if (!socket.user) return next(new Error('Authentication required'));
+    next();
+  });
+
+  messagesNsp.on('connection', (socket) => {
+    const userId = socket.user.id;
+
+    // Join all conversation rooms this user participates in
+    try {
+      const { getUserConversationIds } = require('../services/messageService');
+      const conversationIds = getUserConversationIds(userId);
+      for (const convId of conversationIds) {
+        socket.join(`dm:${convId}`);
+      }
+    } catch (err) {
+      console.error('[WS/Messages] Failed to join conversation rooms:', err.message);
+    }
+
+    // dm:typing — notify other participants that this user is typing
+    socket.on('dm:typing', ({ conversationId }) => {
+      if (!conversationId) return;
+      socket.to(`dm:${conversationId}`).emit('dm:typing', {
+        conversationId,
+        userId,
+        username: socket.user.username,
+      });
+    });
+
+    // dm:stop_typing — notify other participants that this user stopped typing
+    socket.on('dm:stop_typing', ({ conversationId }) => {
+      if (!conversationId) return;
+      socket.to(`dm:${conversationId}`).emit('dm:stop_typing', {
+        conversationId,
+        userId,
+      });
+    });
+
+    // dm:join — join a new conversation room (e.g. after creating a new conversation)
+    socket.on('dm:join', ({ conversationId }) => {
+      if (!conversationId) return;
+      socket.join(`dm:${conversationId}`);
+    });
+  });
+
   return io;
 }
 
+/**
+ * Check if a user has any active socket in a specific room within a namespace.
+ * Used to determine if push notification should be sent.
+ * @param {import('socket.io').Namespace} nsp - The Socket.io namespace.
+ * @param {string} room - The room name (e.g. 'dm:<conversationId>').
+ * @param {string} userId - The user ID to check for.
+ * @returns {boolean} True if the user has at least one socket in the room.
+ */
+function isUserInRoom(nsp, room, userId) {
+  try {
+    const roomSockets = nsp.adapter.rooms.get(room);
+    if (!roomSockets) return false;
+
+    for (const socketId of roomSockets) {
+      const socket = nsp.sockets.get(socketId);
+      if (socket && socket.user && socket.user.id === userId) {
+        return true;
+      }
+    }
+  } catch {
+    // If anything fails, assume user is not in the room
+  }
+  return false;
+}
+
 module.exports = setupWebSocket;
+module.exports.isUserInRoom = isUserInRoom;
